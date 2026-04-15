@@ -9,7 +9,7 @@ fastapi==0.124.4
 greenlet==3.1.1
 h11==0.16.0
 idna==3.11
-pg8000==1.31.2
+psycopg2-binary==2.9.9
 pydantic==2.10.6
 pydantic_core==2.27.2
 python-dateutil==2.9.0.post0
