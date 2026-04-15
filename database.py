@@ -9,15 +9,11 @@ load_dotenv()
 # Получаем ссылку на БД из переменных окружения
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Так как мы используем драйвер pg8000, нам нужно слегка поправить стандартную ссылку postgresql://
-if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://", 1)
-
-# Подключение к БД
-# Если ссылки нет (например, забыли добавить), выдаст ошибку, чтобы мы сразу поняли в чем дело
+# Проверка, чтобы сервер сразу сказал, если мы забыли добавить ссылку в Render
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL не найдена. Пожалуйста, добавьте её в настройки.")
+    raise ValueError("ОШИБКА: DATABASE_URL не найдена. Пожалуйста, добавьте её в настройки Render (Environment).")
 
+# Подключение к БД Neon.tech
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
