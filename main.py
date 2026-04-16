@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 import models
+import hashlib
 
 # Это создаст таблицы в базе данных, если их там еще нет
 Base.metadata.create_all(bind=engine)
@@ -27,7 +28,6 @@ def read_root():
 
 from pydantic import BaseModel
 
-# Схемы Pydantic для приема данных (Раздел 2.2.3: Controller - Валидация)
 class ColumnCreate(BaseModel):
     title: str
     wip_limit: int
@@ -95,3 +95,60 @@ def move_task(task_id: int, target_column_id: int, db: Session = Depends(get_db)
     db.commit()
     
     return {"message": "Задача успешно перемещена"}
+
+# --- СХЕМЫ ДЛЯ АВТОРИЗАЦИИ (Pydantic) ---
+class UserRegister(BaseModel):
+    first_name: str
+    last_name: str
+    username: str
+    email: str
+    password: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+# Простая функция для хэширования пароля (чтобы не хранить пароли в открытом виде)
+def hash_password(password: str):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# --- МАРШРУТЫ АВТОРИЗАЦИИ ---
+
+# 1. Регистрация (Свяжем с RegisterScreen)
+@app.post("/api/v1/auth/register")
+def register_user(user: UserRegister, db: Session = Depends(get_db)):
+    # Проверяем, не занят ли Email или Псевдоним
+    existing_user = db.query(models.User).filter(
+        (models.User.email == user.email) | (models.User.username == user.username)
+    ).first()
+    
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Пользователь с таким Email или Псевдонимом уже существует")
+
+    # Создаем нового пользователя
+    new_user = models.User(
+        first_name=user.first_name,
+        last_name=user.last_name,
+        username=user.username,
+        email=user.email,
+        hashed_password=hash_password(user.password) # Шифруем пароль!
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {"message": "Регистрация успешна. Перейдите к подтверждению Email.", "user_id": new_user.id}
+
+# 2. Логин (Свяжем с LoginScreen)
+@app.post("/api/v1/auth/login")
+def login_user(user: UserLogin, db: Session = Depends(get_db)):
+    # Ищем пользователя по псевдониму
+    db_user = db.query(models.User).filter(models.User.username == user.username).first()
+    
+    if not db_user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        
+    if db_user.hashed_password != hash_password(user.password):
+        raise HTTPException(status_code=400, detail="Неверный пароль")
+        
+    return {"message": "Успешный вход!", "username": db_user.username, "role": db_user.role}

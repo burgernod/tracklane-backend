@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -7,13 +7,16 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    role = Column(String, default="Member") # В курсовой роли: Admin, Member, Reviewer
+    first_name = Column(String, nullable=True)    # Имя
+    last_name = Column(String, nullable=True)     # Фамилия
+    username = Column(String, unique=True, index=True, nullable=False) # Псевдоним
+    email = Column(String, unique=True, index=True, nullable=False)    # Email
+    hashed_password = Column(String, nullable=False) # Зашифрованный пароль
+    
+    role = Column(String, default="Member") # Admin, Member, Reviewer
+    is_active = Column(Boolean, default=False) # Станет True после ввода OTP кода
 
-    # Связи (для курсовой не обязательно прописывать всё сложно, но оставим задел на будущее)
     tasks = relationship("Task", back_populates="assignee")
-
-class Project(Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
