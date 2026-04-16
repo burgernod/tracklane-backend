@@ -40,6 +40,7 @@ class Project(Base):
     title = Column(String, index=True)
     description = Column(Text)
     owner_id = Column(Integer, ForeignKey("users.id"))
+    image_url = Column(String, nullable=True)
 
     members = relationship("ProjectMember", back_populates="project")
     columns = relationship("ColumnModel", back_populates="project")

@@ -425,3 +425,186 @@ def add_member(project_id: int, user_id: int, role: str, db: Session = Depends(g
     db.add(new_mem)
     db.commit()
     return {"message": "Участник добавлен"}
+
+# main.py — добавить в конец файла
+
+# --- СХЕМЫ ---
+class ProjectUpdate(BaseModel):
+    title: str
+    description: Optional[str] = None
+
+# --- ПОЛУЧИТЬ ВСЕ ПРОЕКТЫ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ ---
+@app.get("/api/v1/projects")
+def get_my_projects(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    # Проекты где пользователь является участником (через ProjectMember)
+    memberships = db.query(models.ProjectMember).filter(
+        models.ProjectMember.user_id == current_user.id
+    ).all()
+    
+    project_ids = [m.project_id for m in memberships]
+    projects = db.query(models.Project).filter(models.Project.id.in_(project_ids)).all()
+    
+    result = []
+    for p in projects:
+        # Считаем задачи проекта (через колонки)
+        member_count = db.query(models.ProjectMember).filter(
+            models.ProjectMember.project_id == p.id
+        ).count()
+        
+        # Роль текущего пользователя в этом проекте
+        my_membership = next((m for m in memberships if m.project_id == p.id), None)
+        
+        result.append({
+            "id": p.id,
+            "title": p.title,
+            "description": p.description,
+            "image_url": p.image_url,  # добавим в модель ниже
+            "member_count": member_count,
+            "my_role": my_membership.role if my_membership else "member",
+            "owner_id": p.owner_id,
+        })
+    
+    return result
+
+# --- ПОЛУЧИТЬ УЧАСТНИКОВ ПРОЕКТА ---
+@app.get("/api/v1/projects/{project_id}/members")
+def get_project_members(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    # Проверяем что текущий юзер состоит в проекте
+    my_membership = db.query(models.ProjectMember).filter_by(
+        project_id=project_id, user_id=current_user.id
+    ).first()
+    if not my_membership:
+        raise HTTPException(status_code=403, detail="Нет доступа к этому проекту")
+    
+    memberships = db.query(models.ProjectMember).filter(
+        models.ProjectMember.project_id == project_id
+    ).all()
+    
+    result = []
+    for m in memberships:
+        user = db.query(models.User).filter(models.User.id == m.user_id).first()
+        if user:
+            result.append({
+                "user_id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "avatar_url": user.avatar_url,
+                "role": m.role,
+                "is_me": user.id == current_user.id,
+            })
+    
+    return result
+
+# --- УДАЛИТЬ УЧАСТНИКА ИЗ ПРОЕКТА ---
+@app.delete("/api/v1/projects/{project_id}/members/{user_id}")
+def remove_member(
+    project_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    # Только админ может удалять
+    my_membership = db.query(models.ProjectMember).filter_by(
+        project_id=project_id, user_id=current_user.id
+    ).first()
+    if not my_membership or my_membership.role != "admin":
+        raise HTTPException(status_code=403, detail="Только администратор может удалять участников")
+    
+    # Нельзя удалить владельца проекта
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if project.owner_id == user_id:
+        raise HTTPException(status_code=400, detail="Нельзя удалить владельца проекта")
+    
+    membership = db.query(models.ProjectMember).filter_by(
+        project_id=project_id, user_id=user_id
+    ).first()
+    if not membership:
+        raise HTTPException(status_code=404, detail="Участник не найден")
+    
+    db.delete(membership)
+    db.commit()
+    return {"message": "Участник удалён"}
+
+# --- ОБНОВИТЬ ПРОЕКТ (название, описание, фото) ---
+@app.patch("/api/v1/projects/{project_id}")
+def update_project(
+    project_id: int,
+    data: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    my_membership = db.query(models.ProjectMember).filter_by(
+        project_id=project_id, user_id=current_user.id
+    ).first()
+    if not my_membership or my_membership.role != "admin":
+        raise HTTPException(status_code=403, detail="Только администратор может редактировать проект")
+    
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    
+    project.title = data.title
+    project.description = data.description
+    db.commit()
+    return {"message": "Проект обновлён"}
+
+# --- ОБНОВИТЬ ФОТО ПРОЕКТА ---
+class ProjectImageUpdate(BaseModel):
+    image_url: Optional[str] = None
+
+@app.patch("/api/v1/projects/{project_id}/image")
+def update_project_image(
+    project_id: int,
+    data: ProjectImageUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    my_membership = db.query(models.ProjectMember).filter_by(
+        project_id=project_id, user_id=current_user.id
+    ).first()
+    if not my_membership or my_membership.role != "admin":
+        raise HTTPException(status_code=403, detail="Только администратор может менять фото")
+    
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Проект не найден")
+
+    # Удаляем старое фото из Cloudinary если оно было
+    if project.image_url and data.image_url is None:
+        try:
+            public_id = project.image_url.split('/')[-1].split('.')[0]
+            cloudinary.uploader.destroy(public_id)
+        except Exception as e:
+            print(f"Ошибка удаления фото проекта из Cloudinary: {e}")
+    
+    project.image_url = data.image_url
+    db.commit()
+    return {"message": "Фото проекта обновлено"}
+
+# --- УДАЛИТЬ ПРОЕКТ ---
+@app.delete("/api/v1/projects/{project_id}")
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    
+    # Только владелец может удалить проект
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Только владелец может удалить проект")
+    
+    # Каскадно удаляем участников (задачи и колонки — если настроено cascade в моделях)
+    db.query(models.ProjectMember).filter(
+        models.ProjectMember.project_id == project_id
+    ).delete()
+    
+    db.delete(project)
+    db.commit()
+    return {"message": "Проект удалён"}
