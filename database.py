@@ -14,7 +14,13 @@ if not DATABASE_URL:
     raise ValueError("ОШИБКА: DATABASE_URL не найдена. Пожалуйста, добавьте её в настройки Render (Environment).")
 
 # Подключение к БД Neon.tech
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True, 
+    pool_recycle=300,    
+    pool_size=5,         
+    max_overflow=10
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
