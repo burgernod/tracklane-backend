@@ -4,8 +4,13 @@ from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 import models
 import hashlib
-import jwt # ДОБАВИТЬ СЮДА
+import jwt
+import random
 from datetime import datetime, timedelta
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
 
 # Это создаст таблицы в базе данных, если их там еще нет
 Base.metadata.create_all(bind=engine)
@@ -39,6 +44,32 @@ def create_access_token(data: dict):
 @app.get("/")
 def read_root():
     return {"message": "TrackLane API is running! База данных подключена."}
+
+def send_otp_email(receiver_email: str, otp_code: str):
+    sender_email = os.getenv("SMTP_EMAIL")
+    sender_password = os.getenv("SMTP_PASSWORD")
+    
+    if not sender_email or not sender_password:
+        print("ОШИБКА: SMTP настройки не заданы в .env")
+        return
+
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = "Код подтверждения TrackLane"
+    
+    body = f"Добро пожаловать в TrackLane!\n\nВаш код подтверждения: {otp_code}\n\nКод действителен 5 минут."
+    msg.attach(MIMEText(body, 'plain'))
+    
+    try:
+        # Настройки для Mail.ru (SSL порт 465)
+        server = smtplib.SMTP_SSL('smtp.mail.ru', 465)
+        server.login(sender_email, sender_password)
+        server.send_message(msg)
+        server.quit()
+        print(f"Письмо успешно отправлено на {receiver_email}")
+    except Exception as e:
+        print(f"Ошибка отправки email: {e}")
 
 from pydantic import BaseModel
 
@@ -122,16 +153,18 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+class OTPVerify(BaseModel):
+    email: str
+    otp_code: str
+
 # Простая функция для хэширования пароля (чтобы не хранить пароли в открытом виде)
 def hash_password(password: str):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # --- МАРШРУТЫ АВТОРИЗАЦИИ ---
 
-# 1. Регистрация (Свяжем с RegisterScreen)
 @app.post("/api/v1/auth/register")
 def register_user(user: UserRegister, db: Session = Depends(get_db)):
-    # Проверяем, не занят ли Email или Псевдоним
     existing_user = db.query(models.User).filter(
         (models.User.email == user.email) | (models.User.username == user.username)
     ).first()
@@ -139,38 +172,69 @@ def register_user(user: UserRegister, db: Session = Depends(get_db)):
     if existing_user:
         raise HTTPException(status_code=400, detail="Пользователь с таким Email или Псевдонимом уже существует")
 
-    # Создаем нового пользователя
+    otp = str(random.randint(100000, 999999))
+    expire_time = datetime.utcnow() + timedelta(minutes=5)
+
     new_user = models.User(
         first_name=user.first_name,
         last_name=user.last_name,
         username=user.username,
         email=user.email,
-        hashed_password=hash_password(user.password) # Шифруем пароль!
+        hashed_password=hash_password(user.password),
+        otp_code=otp,
+        otp_expire=expire_time,
+        is_active=False # Пользователь не активен, пока не введет код
     )
     db.add(new_user)
     db.commit()
-    db.refresh(new_user)
     
-    return {"message": "Регистрация успешна. Перейдите к подтверждению Email.", "user_id": new_user.id}
+    # ОТПРАВЛЯЕМ ПИСЬМО СРАЗУ
+    send_otp_email(user.email, otp)
+    
+    return {
+        "message": "Регистрация успешна. Код отправлен на почту.", 
+        "dev_otp": otp # Оставляем для тестов, если SMTP упадет
+    }
 
-# 2. Логин (Свяжем с LoginScreen)
+# --- ИСПРАВЛЕННЫЙ МАРШРУТ ВЕРИФИКАЦИИ ---
+@app.post("/api/v1/auth/verify-otp")
+def verify_otp(data: OTPVerify, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == data.email).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        
+    if user.otp_code != data.otp_code:
+        raise HTTPException(status_code=400, detail="Неверный код")
+        
+    if datetime.utcnow() > user.otp_expire:
+        raise HTTPException(status_code=400, detail="Срок действия кода истек")
+        
+    user.is_active = True # Активируем
+    user.otp_code = None
+    db.commit()
+    
+    return {"message": "Email успешно подтвержден! Теперь вы можете войти."}
+
+# --- ИСПРАВЛЕННЫЙ МАРШРУТ ЛОГИНА ---
 @app.post("/api/v1/auth/login")
 def login_user(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
     
     if not db_user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+    
+    # ПРОВЕРКА: Активирован ли аккаунт?
+    if not db_user.is_active:
+        raise HTTPException(status_code=401, detail="Email не подтвержден. Пожалуйста, введите OTP код.")
         
     if db_user.hashed_password != hash_password(user.password):
         raise HTTPException(status_code=400, detail="Неверный пароль")
     
-    # Генерируем JWT токен!
-    token_data = {"sub": db_user.username, "role": db_user.role}
-    token = create_access_token(token_data)
+    token = create_access_token({"sub": db_user.username, "role": db_user.role})
         
     return {
-        "message": "Успех!", 
-        "username": db_user.username, 
-        "role": db_user.role,
-        "token": token # Отправляем токен на фронтенд
+        "token": token,
+        "username": db_user.username,
+        "message": "Успешный вход"
     }

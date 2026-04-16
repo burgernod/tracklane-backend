@@ -15,6 +15,9 @@ class User(Base):
     role = Column(String, default="Member")
     is_active = Column(Boolean, default=False)
 
+    otp_code = Column(String, nullable=True)
+    otp_expire = Column(DateTime, nullable=True)
+
     tasks = relationship("Task", back_populates="assignee")
 
 class Project(Base):
