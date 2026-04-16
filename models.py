@@ -18,6 +18,8 @@ class User(Base):
     otp_code = Column(String, nullable=True)
     otp_expire = Column(DateTime, nullable=True)
 
+    avatar_url = Column(String, nullable=True)
+
     tasks = relationship("Task", back_populates="assignee")
 
 class Project(Base):

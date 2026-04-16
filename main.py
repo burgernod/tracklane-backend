@@ -337,3 +337,30 @@ def update_user_me(data: UserUpdate, db: Session = Depends(get_db), current_user
     current_user.email = data.email
     db.commit()
     return {"message": "Профиль обновлен успешно"}
+
+# Схемы
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
+class AvatarUpdate(BaseModel):
+    avatar_url: str
+
+# 1. Смена пароля
+@app.patch("/api/v1/users/me/password")
+def change_password(data: PasswordChange, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    # Проверяем старый пароль
+    if hash_password(data.old_password) != current_user.hashed_password:
+        raise HTTPException(status_code=400, detail="Старый пароль введен неверно")
+    
+    # Хэшируем и сохраняем новый
+    current_user.hashed_password = hash_password(data.new_password)
+    db.commit()
+    return {"message": "Пароль успешно изменен"}
+
+# 2. Обновление ссылки на аватар
+@app.patch("/api/v1/users/me/avatar")
+def update_avatar(data: AvatarUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    current_user.avatar_url = data.avatar_url # Не забудьте добавить это поле в models.py (String, nullable=True)
+    db.commit()
+    return {"message": "Аватар обновлен"}
