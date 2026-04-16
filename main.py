@@ -238,3 +238,57 @@ def login_user(user: UserLogin, db: Session = Depends(get_db)):
         "username": db_user.username,
         "message": "Успешный вход"
     }
+
+    # --- СХЕМЫ ДЛЯ СБРОСА ПАРОЛЯ ---
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordConfirm(BaseModel):
+    email: str
+    otp_code: str
+    new_password: str
+
+# 1. Запрос кода для сброса пароля
+@app.post("/api/v1/auth/forgot-password")
+def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == data.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь с таким Email не найден")
+
+    otp = str(random.randint(100000, 999999))
+    user.otp_code = otp
+    user.otp_expire = datetime.utcnow() + timedelta(minutes=5)
+    db.commit()
+
+    send_otp_email(user.email, otp)
+    return {"message": "Код для сброса пароля отправлен на почту"}
+
+# 2. Установка нового пароля
+@app.post("/api/v1/auth/reset-password")
+def reset_password(data: ResetPasswordConfirm, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == data.email).first()
+    if not user or user.otp_code != data.otp_code:
+        raise HTTPException(status_code=400, detail="Неверный код или Email")
+
+    if datetime.utcnow() > user.otp_expire:
+        raise HTTPException(status_code=400, detail="Срок действия кода истек")
+
+    user.hashed_password = hash_password(data.new_password)
+    user.otp_code = None # Очищаем код
+    db.commit()
+    return {"message": "Пароль успешно изменен"}
+
+# 3. Переотправка OTP (универсальный для регистрации и сброса)
+@app.post("/api/v1/auth/resend-otp")
+def resend_otp(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == data.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    
+    otp = str(random.randint(100000, 999999))
+    user.otp_code = otp
+    user.otp_expire = datetime.utcnow() + timedelta(minutes=5)
+    db.commit()
+    
+    send_otp_email(user.email, otp)
+    return {"message": "Новый код отправлен"}
