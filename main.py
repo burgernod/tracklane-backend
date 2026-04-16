@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import engine, Base, get_db
+from fastapi.security import OAuth2PasswordBearer
 import models
 import hashlib
 import jwt
@@ -292,3 +293,47 @@ def resend_otp(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
     
     send_otp_email(user.email, otp)
     return {"message": "Новый код отправлен"}
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login")
+
+# Функция для получения текущего пользователя по токену
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Недействительный токен")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Ошибка авторизации")
+    
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Пользователь не найден")
+    return user
+
+# Схемы для обновления
+class UserUpdate(BaseModel):
+    first_name: str
+    last_name: str
+    username: str
+    email: str
+
+# 1. Получение данных профиля
+@app.get("/api/v1/users/me")
+def read_user_me(current_user: models.User = Depends(get_current_user)):
+    return {
+        "first_name": current_user.first_name,
+        "last_name": current_user.last_name,
+        "username": current_user.username,
+        "email": current_user.email
+    }
+
+# 2. Обновление профиля
+@app.patch("/api/v1/users/me")
+def update_user_me(data: UserUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    current_user.first_name = data.first_name
+    current_user.last_name = data.last_name
+    current_user.username = data.username
+    current_user.email = data.email
+    db.commit()
+    return {"message": "Профиль обновлен успешно"}
