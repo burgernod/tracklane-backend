@@ -13,6 +13,15 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 from typing import Optional
+import cloudinary
+import cloudinary.uploader
+
+# Настройка (вставьте свои данные)
+cloudinary.config(
+  cloud_name = "dm88hpprs",
+  api_key = "661286517838562",
+  api_secret = "4kODYjembAHFri1xHHqh1m5-HfY"
+)
 
 # Это создаст таблицы в базе данных, если их там еще нет
 Base.metadata.create_all(bind=engine)
@@ -363,6 +372,15 @@ def change_password(data: PasswordChange, db: Session = Depends(get_db), current
 # 2. Обновление ссылки на аватар
 @app.patch("/api/v1/users/me/avatar")
 def update_avatar(data: AvatarUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    current_user.avatar_url = data.avatar_url # Не забудьте добавить это поле в models.py (String, nullable=True)
+    # Если мы хотим удалить старое фото из Cloudinary
+    if current_user.avatar_url and (data.avatar_url is None):
+        try:
+            # Извлекаем public_id из URL (это часть между последним / и расширением)
+            public_id = current_user.avatar_url.split('/')[-1].split('.')[0]
+            cloudinary.uploader.destroy(public_id)
+        except Exception as e:
+            print(f"Ошибка удаления из Cloudinary: {e}")
+
+    current_user.avatar_url = data.avatar_url
     db.commit()
     return {"message": "Аватар обновлен"}
