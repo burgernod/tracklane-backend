@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 import models
 import hashlib
+import jwt # ДОБАВИТЬ СЮДА
+from datetime import datetime, timedelta
 
 # Это создаст таблицы в базе данных, если их там еще нет
 Base.metadata.create_all(bind=engine)
@@ -21,6 +23,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Настройки для JWT (Секретный ключ)
+SECRET_KEY = "tracklane_super_secret_key_rpo_coursework"
+ALGORITHM = "HS256"
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    # Токен будет жить 30 дней (для функции "Запомнить меня")
+    expire = datetime.utcnow() + timedelta(days=30)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 @app.get("/")
 def read_root():
@@ -142,7 +156,6 @@ def register_user(user: UserRegister, db: Session = Depends(get_db)):
 # 2. Логин (Свяжем с LoginScreen)
 @app.post("/api/v1/auth/login")
 def login_user(user: UserLogin, db: Session = Depends(get_db)):
-    # Ищем пользователя по псевдониму
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
     
     if not db_user:
@@ -150,5 +163,14 @@ def login_user(user: UserLogin, db: Session = Depends(get_db)):
         
     if db_user.hashed_password != hash_password(user.password):
         raise HTTPException(status_code=400, detail="Неверный пароль")
+    
+    # Генерируем JWT токен!
+    token_data = {"sub": db_user.username, "role": db_user.role}
+    token = create_access_token(token_data)
         
-    return {"message": "Успешный вход!", "username": db_user.username, "role": db_user.role}
+    return {
+        "message": "Успех!", 
+        "username": db_user.username, 
+        "role": db_user.role,
+        "token": token # Отправляем токен на фронтенд
+    }
