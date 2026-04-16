@@ -12,6 +12,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
+from typing import Optional
 
 # Это создаст таблицы в базе данных, если их там еще нет
 Base.metadata.create_all(bind=engine)
@@ -345,7 +346,7 @@ class PasswordChange(BaseModel):
     new_password: str
 
 class AvatarUpdate(BaseModel):
-    avatar_url: str
+    avatar_url: Optional[str] = None
 
 # 1. Смена пароля
 @app.patch("/api/v1/users/me/password")
