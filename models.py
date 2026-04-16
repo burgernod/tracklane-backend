@@ -22,13 +22,26 @@ class User(Base):
 
     tasks = relationship("Task", back_populates="assignee")
 
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    role = Column(String, default="member") # admin, reviewer, member
+
+    # Связи
+    user = relationship("User")
+    project = relationship("Project", back_populates="members")
+
+# Обновите класс Project
 class Project(Base):
     __tablename__ = "projects"
-
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True, nullable=False)
-    description = Column(Text, nullable=True)
+    title = Column(String, index=True)
+    description = Column(Text)
+    owner_id = Column(Integer, ForeignKey("users.id"))
 
+    members = relationship("ProjectMember", back_populates="project")
     columns = relationship("ColumnModel", back_populates="project")
 
 class ColumnModel(Base):

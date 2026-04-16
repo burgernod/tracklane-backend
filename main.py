@@ -18,9 +18,9 @@ import cloudinary.uploader
 
 # Настройка (вставьте свои данные)
 cloudinary.config(
-  cloud_name = "dm88hpprs",
-  api_key = "661286517838562",
-  api_secret = "4kODYjembAHFri1xHHqh1m5-HfY"
+  cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME"),
+  api_key = os.getenv("CLOUDINARY_API_KEY"),
+  api_secret = os.getenv("CLOUDINARY_API_SECRET")
 )
 
 # Это создаст таблицы в базе данных, если их там еще нет
@@ -384,3 +384,44 @@ def update_avatar(data: AvatarUpdate, db: Session = Depends(get_db), current_use
     current_user.avatar_url = data.avatar_url
     db.commit()
     return {"message": "Аватар обновлен"}
+
+# --- 1. SEARCH USERS (Для поиска как в почте) ---
+@app.get("/api/v1/users/search")
+def search_users(query: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    # Ищем по части username или email, исключая себя
+    users = db.query(models.User).filter(
+        (models.User.username.ilike(f"%{query}%")) | (models.User.email.ilike(f"%{query}%")),
+        models.User.id != current_user.id
+    ).limit(10).all()
+    
+    return [{"id": u.id, "username": u.username, "email": u.email, "avatar_url": u.avatar_url} for u in users]
+
+# --- 2. PROJECTS LOGIC ---
+class ProjectCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+
+@app.post("/api/v1/projects")
+def create_project(data: ProjectCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    new_project = models.Project(title=data.title, description=data.description, owner_id=current_user.id)
+    db.add(new_project)
+    db.commit()
+    db.refresh(new_project)
+    
+    # Сразу добавляем создателя как ADMIN
+    member = models.ProjectMember(project_id=new_project.id, user_id=current_user.id, role="admin")
+    db.add(member)
+    db.commit()
+    return new_project
+
+@app.post("/api/v1/projects/{project_id}/members")
+def add_member(project_id: int, user_id: int, role: str, db: Session = Depends(get_db)):
+    # Проверка на дубликат
+    exists = db.query(models.ProjectMember).filter_by(project_id=project_id, user_id=user_id).first()
+    if exists:
+        raise HTTPException(status_code=400, detail="Пользователь уже в проекте")
+    
+    new_mem = models.ProjectMember(project_id=project_id, user_id=user_id, role=role)
+    db.add(new_mem)
+    db.commit()
+    return {"message": "Участник добавлен"}
