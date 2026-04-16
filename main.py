@@ -325,7 +325,8 @@ def read_user_me(current_user: models.User = Depends(get_current_user)):
         "first_name": current_user.first_name,
         "last_name": current_user.last_name,
         "username": current_user.username,
-        "email": current_user.email
+        "email": current_user.email,
+        "avatar_url": current_user.avatar_url 
     }
 
 # 2. Обновление профиля
