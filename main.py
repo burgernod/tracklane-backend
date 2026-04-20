@@ -141,23 +141,22 @@ def login_user(user: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Неверный пароль")
     return {"token": create_access_token({"sub": db_user.username}), "username": db_user.username}
 
+# НОВОЕ: Забыл пароль (Отправка кода)
 @app.post("/api/v1/auth/forgot-password")
 def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == request.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь с таким email не найден")
     
-    # Генерируем новый OTP код для сброса
     otp = str(random.randint(100000, 999999))
     user.otp_code = otp
     user.otp_expire = datetime.utcnow() + timedelta(minutes=10)
     db.commit()
     
-    # Отправляем письмо
     send_otp_email(user.email, otp)
     return {"message": "Код восстановления отправлен на почту"}
 
-
+# НОВОЕ: Сброс пароля (Подтверждение)
 @app.post("/api/v1/auth/reset-password")
 def reset_password(data: ResetPasswordConfirm, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == data.email).first()
@@ -165,13 +164,11 @@ def reset_password(data: ResetPasswordConfirm, db: Session = Depends(get_db)):
     if not user or user.otp_code != data.otp_code:
         raise HTTPException(status_code=400, detail="Неверный код подтверждения")
         
-    # Проверяем, не истек ли код
     if user.otp_expire and datetime.utcnow() > user.otp_expire:
         raise HTTPException(status_code=400, detail="Срок действия кода истек")
         
-    # Сбрасываем пароль
     user.hashed_password = hash_password(data.new_password)
-    user.otp_code = None # Очищаем код после использования
+    user.otp_code = None 
     user.otp_expire = None
     db.commit()
     
@@ -192,6 +189,16 @@ def update_avatar(data: AvatarUpdate, db: Session = Depends(get_db), u: models.U
         except: pass
     u.avatar_url = data.avatar_url; db.commit()
     return {"message": "Updated"}
+
+# НОВОЕ: Изменение пароля внутри профиля
+@app.patch("/api/v1/users/me/password")
+def change_password(data: PasswordChange, db: Session = Depends(get_db), u: models.User = Depends(get_current_user)):
+    if u.hashed_password != hash_password(data.old_password):
+        raise HTTPException(status_code=400, detail="Неверный старый пароль")
+    
+    u.hashed_password = hash_password(data.new_password)
+    db.commit()
+    return {"message": "Пароль успешно обновлен"}
 
 @app.get("/api/v1/users/search")
 def search_users(query: str, db: Session = Depends(get_db), u: models.User = Depends(get_current_user)):
