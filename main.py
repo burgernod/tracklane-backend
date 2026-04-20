@@ -59,18 +59,28 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 def send_otp_email(receiver_email: str, otp_code: str):
     sender_email = os.getenv("SMTP_EMAIL")
     sender_password = os.getenv("SMTP_PASSWORD")
-    if not sender_email or not sender_password: return
+    
+    if not sender_email or not sender_password: 
+        print("SMTP credentials are not set!")
+        return
+        
     msg = MIMEMultipart()
     msg['Subject'] = "Код подтверждения TrackLane"
+    # МІНДЕТТІ ТҮРДЕ ҚОСУ КЕРЕК:
+    msg['From'] = sender_email 
+    msg['To'] = receiver_email
+    
     body = f"Ваш код подтверждения: {otp_code}. Действителен 5 минут."
     msg.attach(MIMEText(body, 'plain'))
+    
     try:
         server = smtplib.SMTP_SSL('smtp.mail.ru', 465)
         server.login(sender_email, sender_password)
         server.send_message(msg)
         server.quit()
-    except Exception as e: print(f"Email error: {e}")
-
+        print(f"Email successfully sent to {receiver_email}")
+    except Exception as e: 
+        print(f"Email error: {e}")
 # --- 3. СХЕМЫ ДАННЫХ (PYDANTIC) ---
 
 class UserRegister(BaseModel):
